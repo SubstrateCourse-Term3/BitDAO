@@ -5,7 +5,7 @@ use frame_support::{
 use sp_runtime::{traits::{SimpleArithmetic, Bounded, Member}, DispatchError};
 use codec::{Encode, EncodeLike, Decode, Output, Input};
 use sp_io::hashing::blake2_128;
-use system::ensure_signed;
+use system::{ensure_signed, ensure_root};
 use sp_std::result;
 use crate::linked_item::{LinkedList, LinkedItem};
 use system::{offchain::SubmitUnsignedTransaction};
@@ -134,7 +134,7 @@ decl_module! {
 
 		/// Create a new wild animal
 		pub fn create_wild_animal(origin, health_point:u32, combat_effectiveness:u32) {
-			let sender = ensure_signed(origin)?;
+			ensure_root(origin)?;
 			let wild_animal_id = Self::wild_animals_count();
 			WildAnimalsCount::put(wild_animal_id+1);
 			let wild_animal = WildAnimal{
