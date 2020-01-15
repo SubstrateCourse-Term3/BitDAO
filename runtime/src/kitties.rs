@@ -21,17 +21,23 @@ type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::Ac
 
 pub struct Kitty(pub [u8; 16]);
 
+#[derive(Encode,Decode,Default,Clone,PartialEq)]
+pub struct WildAnimal {
+	pub hp:u32, 
+	pub ce:u32,
+}
+
 #[derive(Encode,Decode,PartialEq,Eq,Clone,Debug)]
 pub enum BattleType{
-	WILD, //打野
-	KITTY,//对战
+	WILD, 
+	KITTY,
 }
 
 #[derive(Encode,Decode,Default,Clone,PartialEq)]
 pub struct KittyAttr<Moment> {
-	pub hp:u32, //血量
-	pub exp:u32,//经验值
-	pub ec:u32,
+	pub hp:u32, 
+	pub exp:u32,
+	pub ce:u32,
 	pub battle_begin: Option<Moment>,
 	pub battle_end: Option<Moment>,
 	pub battle_type: Option<BattleType>,
@@ -58,6 +64,10 @@ decl_storage! {
 	trait Store for Module<T: Trait> as Kitties {
 		/// Stores all the kitties, key is the kitty id / index
 		pub Kitties get(fn kitties): map T::KittyIndex => Option<Kitty>;
+
+		pub WildAnimalsCount get(fn wild_animals_count): u32;
+		
+		pub WildAnimals get(fn wild_animals): map u32 => Option<WildAnimal>;
 		/// Stores the total number of kitties. i.e. the next kitty index
 		pub KittiesCount get(fn kitties_count): T::KittyIndex;
 
@@ -122,6 +132,18 @@ decl_module! {
 			Self::deposit_event(RawEvent::Created(sender, kitty_id));
 		}
 
+		/// Create a new wild animal
+		pub fn create_wild_animal(origin, health_point:u32, combat_effectiveness:u32) {
+			let sender = ensure_signed(origin)?;
+			let wild_animal_id = Self::wild_animals_count();
+			WildAnimalsCount::put(wild_animal_id+1);
+			let wild_animal = WildAnimal{
+				hp: health_point,
+				ce: combat_effectiveness,
+			};
+			WildAnimals::insert(wild_animal_id, wild_animal);
+		}
+
 		/// Breed kitties
 		pub fn breed(origin, kitty_id_1: T::KittyIndex, kitty_id_2: T::KittyIndex) {
 			let sender = ensure_signed(origin)?;
@@ -179,17 +201,31 @@ decl_module! {
 
 			Self::deposit_event(RawEvent::Sold(owner, sender, kitty_id, kitty_price));
 		}
-		//对战
 		pub fn battle(origin,kitty_id:T::KittyIndex,target_id:T::KittyIndex){
 		}
 
 
-		//打野
-		pub fn battle_wild(origin,kitty_id:T::KittyIndex){
+		pub fn battle_wild(origin,kitty_id:T::KittyIndex,wild_animal_id:u32){
+			let sender = ensure_signed(origin)?;
+			ensure!(<OwnedKitties<T>>::exists((&sender, Some(kitty_id))), Error::<T>::RequiresOwner);
 
+			let mut kitty = Self::kitty_attrs(kitty_id);
+			let wild_animal = Self::wild_animals(wild_animal_id);
+			let wild_animal = wild_animal.unwrap();
+
+			let kitty_score = kitty.hp / wild_animal.ce;
+			let wild_animal_score = wild_animal.hp / kitty.ce;
+
+			if kitty_score > wild_animal_score {
+				// success
+				kitty.exp = kitty.exp + wild_animal.hp * wild_animal.ce;
+			}
+
+			//除了一个系数
+			kitty.hp = kitty.hp - wild_animal.hp * wild_animal.ce / 10;
+			<KittyAttrs<T>>::insert(kitty_id, kitty);
 		}
 
-		//回血
 		pub fn full_health(origin,kitty_id:T::KittyIndex){
 
 		}
