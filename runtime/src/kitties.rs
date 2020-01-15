@@ -5,12 +5,13 @@ use frame_support::{
 use sp_runtime::{traits::{SimpleArithmetic, Bounded, Member}, DispatchError};
 use codec::{Encode, EncodeLike, Decode, Output, Input};
 use sp_io::hashing::blake2_128;
-use system::ensure_signed;
+use system::{ensure_signed,ensure_root};
 use sp_std::result;
 use crate::linked_item::{LinkedList, LinkedItem};
 use system::{offchain::SubmitUnsignedTransaction};
+use sp_std::vec::Vec;
 
-pub trait Trait: system::Trait+timestamp::Trait {
+pub trait Trait: system::Trait+timestamp::Trait{
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 	type KittyIndex: Parameter + Member + SimpleArithmetic + Bounded + Default + Copy;
 	type Currency: Currency<Self::AccountId>;
@@ -18,7 +19,7 @@ pub trait Trait: system::Trait+timestamp::Trait {
 }
 
 type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
-
+type WeaponryIndex = u32;
 pub struct Kitty(pub [u8; 16]);
 
 #[derive(Encode,Decode,PartialEq,Eq,Clone,Debug)]
@@ -31,10 +32,25 @@ pub enum BattleType{
 pub struct KittyAttr<Moment> {
 	pub hp:u32, //血量
 	pub exp:u32,//经验值
-	pub ec:u32,
+	pub ce:u32,//攻击力
 	pub battle_begin: Option<Moment>,
 	pub battle_end: Option<Moment>,
 	pub battle_type: Option<BattleType>,
+}
+#[derive(Encode,Decode,Clone,PartialEq,Eq,Copy,Debug)]
+pub enum WeaponryKind{
+	HELMET,//头盔
+	ARMOR, //铠甲
+	WEAPON, //武器
+	SHOES,//鞋子
+}
+//疯狂面具,吸血面具,刃甲,强袭装甲,羊刀,圣剑 精灵皮靴,飞鞋
+#[derive(Encode,Decode,Clone,PartialEq)]
+pub struct Weaponry<BalanceOf>{
+	pub name:Vec<u8>,
+	pub kind:WeaponryKind,
+	pub ce:u32,
+	pub price:BalanceOf,
 }
 
 impl Encode for Kitty {
@@ -54,6 +70,9 @@ impl Decode for Kitty {
 type KittyLinkedItem<T> = LinkedItem<<T as Trait>::KittyIndex>;
 type OwnedKittiesList<T> = LinkedList<OwnedKitties<T>, <T as system::Trait>::AccountId, <T as Trait>::KittyIndex>;
 
+// type WeaponryLinkedItem = LinkedItem<WeaponryIndex>;
+// type WeaponrysList<T> = LinkedList<WeaponryIndexList,<T as system::Trait>::AccountId, WeaponryIndex>;
+
 decl_storage! {
 	trait Store for Module<T: Trait> as Kitties {
 		/// Stores all the kitties, key is the kitty id / index
@@ -68,7 +87,16 @@ decl_storage! {
 		/// Get kitty price. None means not for sale.
 		pub KittyPrices get(fn kitty_price): map T::KittyIndex => Option<BalanceOf<T>>;
 
-		pub KittyAttrs get(fn kitty_attrs): map  T::KittyIndex => KittyAttr<T::Moment>;
+		pub KittyAttrs get(fn kitty_attrs): map  T::KittyIndex => Option<KittyAttr<T::Moment>>;
+
+		//系统武器商店
+		pub Weaponrys get(fn weaponrys):map WeaponryIndex => Option<Weaponry<BalanceOf<T>>>;
+
+		//武器数量
+		pub WeaponrysCount get(fn weaponrys_count): WeaponryIndex;
+
+		//每猫至多装配四个武器
+		pub KittyWeaponrys get(fn kitty_weaponrys):map  (T::KittyIndex,WeaponryKind) =>Option<WeaponryIndex>;
 	}
 }
 
@@ -100,6 +128,7 @@ decl_error! {
 		KittiesCountOverflow,
 		RequiresDifferentParents,
 		//TODO 添加错误信息
+		IndexCountOverflow,
 	}
 }
 
@@ -179,6 +208,7 @@ decl_module! {
 
 			Self::deposit_event(RawEvent::Sold(owner, sender, kitty_id, kitty_price));
 		}
+
 		//对战
 		pub fn battle(origin,kitty_id:T::KittyIndex,target_id:T::KittyIndex){
 		}
@@ -193,7 +223,24 @@ decl_module! {
 		pub fn full_health(origin,kitty_id:T::KittyIndex){
 
 		}
+		//商店上新装备,需要root权限
+		pub fn add_weaponry(origin,kind:WeaponryKind,name:Vec<u8>,combat_effectiveness:u32,price:BalanceOf<T>){
+			let sender = ensure_root(origin)?;
+			let weaponry_id = Self::next_weaponry_id()?;
+			let weaponry = Weaponry{
+				name,
+				ce:combat_effectiveness,
+				price,
+				kind
+			};
+			<Weaponrys<T>>::insert(weaponry_id,weaponry);
+			WeaponrysCount::put(weaponry_id+1);
+		}
+		//购买装备
+		pub fn buy_weaponry(origin,weaponry_id:WeaponryIndex){
+			let sender = ensure_signed(origin)?;
 
+		}
 
 		fn offchain_worker(curr_block: T::BlockNumber){
 			Self::do_offchain(curr_block)
@@ -212,6 +259,15 @@ impl<T: Trait> Module<T> {
 		false
 	}
 
+	//取猫攻击力
+	fn get_kitty_ce(kitty_id:&T::KittyIndex) -> u32 {
+		let attrs = Self::kitty_attrs(kitty_id);
+		if (attrs.is_some()){
+			return attrs.unwrap().ce
+		}
+		return 0;
+	}
+
 	fn random_value(sender: &T::AccountId) -> [u8; 16] {
 		let payload = (
 			T::Randomness::random_seed(),
@@ -228,6 +284,14 @@ impl<T: Trait> Module<T> {
 			return Err(Error::<T>::KittiesCountOverflow.into());
 		}
 		Ok(kitty_id)
+	}
+
+	fn next_weaponry_id()-> result::Result<WeaponryIndex, DispatchError> {
+		let weaponry_id = Self::weaponrys_count();
+		// if weaponry_id = WeaponryIndex::max_value(){
+			// return Err(Error::IndexCountOverflow.into());
+		// }
+		Ok(weaponry_id)
 	}
 
 	fn insert_owned_kitty(owner: &T::AccountId, kitty_id: T::KittyIndex) {
@@ -286,7 +350,7 @@ impl<T: Trait> Module<T> {
 	
 	//战后经验处理
 	fn do_exp(kitty_id:T::KittyIndex,exp:u32){
-
+		
 	}
 
 	//回血，判断是否处于战斗中
