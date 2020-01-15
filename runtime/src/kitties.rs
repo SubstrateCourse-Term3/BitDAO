@@ -97,7 +97,7 @@ decl_storage! {
 		/// Get kitty price. None means not for sale.
 		pub KittyPrices get(fn kitty_price): map T::KittyIndex => Option<BalanceOf<T>>;
 
-		pub KittyAttrs get(fn kitty_attrs): map  T::KittyIndex => Option<KittyAttr<T::Moment>>;
+		pub KittyAttrs get(fn kitty_attrs): map  T::KittyIndex => KittyAttr<T::Moment>;
 
 		//系统武器商店
 		pub Weaponrys get(fn weaponrys):map WeaponryIndex => Option<Weaponry<BalanceOf<T>>>;
@@ -237,7 +237,7 @@ decl_module! {
 		pub fn battle_wild(origin,kitty_id:T::KittyIndex,wild_animal_id:u32){
 			let sender = ensure_signed(origin)?;
 			ensure!(<OwnedKitties<T>>::exists((&sender, Some(kitty_id))), Error::<T>::RequiresOwner);
-
+			let ce = Self::get_kitty_ce(&kitty_id);
 			let mut kitty = Self::kitty_attrs(kitty_id);
 			let wild_animal = Self::wild_animals(wild_animal_id);
 			let wild_animal = wild_animal.unwrap();
@@ -272,9 +272,13 @@ decl_module! {
 			WeaponrysCount::put(weaponry_id+1);
 		}
 		//购买装备
-		pub fn buy_weaponry(origin,weaponry_id:WeaponryIndex){
+		pub fn buy_weaponry(origin,kitty_id:T::KittyIndex,weaponry_id:WeaponryIndex){
 			let sender = ensure_signed(origin)?;
-
+			ensure!(<OwnedKitties<T>>::exists((&sender, Some(kitty_id))), Error::<T>::RequiresOwner);
+			if let Some(weaponry) = Self::weaponrys(weaponry_id){
+				<KittyWeaponrys<T>>::insert((kitty_id,weaponry.kind),weaponry_id);
+				//TODO transfer to root
+			}
 		}
 
 		fn offchain_worker(curr_block: T::BlockNumber){
@@ -297,8 +301,21 @@ impl<T: Trait> Module<T> {
 	//取猫攻击力
 	fn get_kitty_ce(kitty_id:&T::KittyIndex) -> u32 {
 		let attrs = Self::kitty_attrs(kitty_id);
-		if (attrs.is_some()){
-			return attrs.unwrap().ce
+		let mut weapon_ce = 0u32;
+		weapon_ce += Self::get_kitty_weaponry_ce(kitty_id,WeaponryKind::HELMET);
+		weapon_ce += Self::get_kitty_weaponry_ce(kitty_id,WeaponryKind::ARMOR);
+		weapon_ce += Self::get_kitty_weaponry_ce(kitty_id,WeaponryKind::WEAPON);
+		weapon_ce += Self::get_kitty_weaponry_ce(kitty_id,WeaponryKind::SHOES);
+		print("get_kitty_ce");
+		print(weapon_ce);
+		attrs.ce+weapon_ce
+	}
+
+	fn get_kitty_weaponry_ce(kitty_id:&T::KittyIndex,kind:WeaponryKind)->u32{
+		if let Some(weapon_id) = Self::kitty_weaponrys((kitty_id,kind)){
+			if let Some(weapon) = Self::weaponrys(weapon_id){
+				return weapon.ce;
+			}
 		}
 		return 0;
 	}
