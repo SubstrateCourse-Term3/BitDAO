@@ -198,7 +198,7 @@ decl_module! {
 				//加血
 				kitty.hp = 100;
 			}
-			
+			<KittyAttrs<T>>::insert(kitty_id, kitty);
 		}
 
 
