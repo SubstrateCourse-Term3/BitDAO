@@ -191,7 +191,14 @@ decl_module! {
 
 		//回血
 		pub fn full_health(origin,kitty_id:T::KittyIndex){
-
+			let sender = ensure_signed(origin)?;
+			ensure!(<OwnedKitties<T>>::exists((&sender, Some(kitty_id))), Error::<T>::RequiresOwner);
+			let mut kitty = Self::kitty_attrs(kitty_id);
+			if kitty.hp < 100 {
+				//加血
+				kitty.hp = 100;
+			}
+			
 		}
 
 
