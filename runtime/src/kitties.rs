@@ -19,7 +19,6 @@ pub trait Trait: system::Trait+timestamp::Trait+sudo::Trait{
 	type Currency: Currency<Self::AccountId>;
 	type Randomness: Randomness<Self::Hash>;
 }
-
 pub type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 type WeaponryIndex = u32;
 pub struct Kitty(pub [u8; 16]);
@@ -37,12 +36,12 @@ pub enum BattleType{
 }
 
 #[derive(Encode,Decode,Default,Clone,PartialEq)]
-pub struct KittyAttr<Moment> {
+pub struct KittyAttr<BlockNumber> {
 	pub hp:u32, 
 	pub exp:u32,
 	pub ce:u32,
-	pub battle_begin: Option<Moment>,
-	pub battle_end: Option<Moment>,
+	pub battle_begin: Option<BlockNumber>,
+	pub battle_end: Option<BlockNumber>,
 	pub battle_type: Option<BattleType>,
 }
 #[derive(Encode,Decode,Clone,PartialEq,Eq,Copy,Debug)]
@@ -79,7 +78,6 @@ impl Decode for Kitty {
 
 type KittyLinkedItem<T> = LinkedItem<<T as Trait>::KittyIndex>;
 type OwnedKittiesList<T> = LinkedList<OwnedKitties<T>, <T as system::Trait>::AccountId, <T as Trait>::KittyIndex>;
-
 // type WeaponryLinkedItem = LinkedItem<WeaponryIndex>;
 // type WeaponrysList<T> = LinkedList<WeaponryIndexList,<T as system::Trait>::AccountId, WeaponryIndex>;
 
@@ -101,7 +99,7 @@ decl_storage! {
 		/// Get kitty price. None means not for sale.
 		pub KittyPrices get(fn kitty_price): map T::KittyIndex => Option<BalanceOf<T>>;
 
-		pub KittyAttrs get(fn kitty_attrs): map  T::KittyIndex => KittyAttr<T::Moment>;
+		pub KittyAttrs get(fn kitty_attrs): map  T::KittyIndex => KittyAttr<T::BlockNumber>;
 
 		//系统武器商店
 		pub Weaponrys get(fn weaponrys) config() :map WeaponryIndex => Option<Weaponry<BalanceOf<T>>>;
@@ -128,8 +126,14 @@ decl_event!(
 		Ask(AccountId, KittyIndex, Option<Balance>),
 		/// A kitty is sold. (from, to, kitty_id, price)
 		Sold(AccountId, AccountId, KittyIndex, Balance),
-
-		//TODO 添加猫对战相关Event
+		/// A weaponry is created(owner,weaponry_index)
+		AddWeaponry(AccountId,WeaponryIndex),
+		/// Weaponry bought for kitty .(owner,kitty_id,weaponry_index,price)
+		BuyWeaponry(AccountId, KittyIndex, WeaponryIndex, Balance),
+		///full health .(owner,kitty_id,price)
+		FullHealth(AccountId,KittyIndex,Balance),
+		/// Battled (owner,kitty_1,kitty_2,win_kitty_id)
+		Battled(AccountId,KittyIndex,KittyIndex,KittyIndex),
 	}
 );
 
@@ -143,6 +147,8 @@ decl_error! {
 		RequiresDifferentParents,
 		//TODO 添加错误信息
 		IndexCountOverflow,
+		KittyIsBattling,
+		RequiresDifferentOwner,
 	}
 }
 
@@ -169,7 +175,7 @@ decl_module! {
 		pub fn create_wild_animal(origin, health_point:u32, combat_effectiveness:u32) {
 			ensure_root(origin)?;
 			let wild_animal_id = Self::wild_animals_count();
-			WildAnimalsCount::put(wild_animal_id+1);
+			WildAnimalsCount::put(wild_animal_id.checked_add(1).ok_or("overflow")?);
 			let wild_animal = WildAnimal{
 				hp: health_point,
 				ce: combat_effectiveness,
@@ -235,6 +241,37 @@ decl_module! {
 			Self::deposit_event(RawEvent::Sold(owner, sender, kitty_id, kitty_price));
 		}
 		pub fn battle(origin,kitty_id:T::KittyIndex,target_id:T::KittyIndex){
+			let sender = ensure_signed(origin)?;
+			let curr_block = <system::Module<T>>::block_number();
+			ensure!(<OwnedKitties<T>>::exists((&sender, Some(kitty_id))), Error::<T>::RequiresOwner);
+			ensure!(Self::check_battling(kitty_id),Error::<T>::KittyIsBattling);
+			ensure!(Self::kitty_owner(target_id).map(|owner| owner != sender).unwrap_or(true), Error::<T>::RequiresDifferentOwner);
+			ensure!(Self::check_battling(target_id),Error::<T>::KittyIsBattling);
+			let mut kitty_attr_1 = Self::kitty_attrs(kitty_id);
+			let mut kitty_attr_2 = Self::kitty_attrs(target_id);
+			let kitty_1_ce = Self::get_kitty_ce(&kitty_id);
+			let kitty_2_ce = Self::get_kitty_ce(&target_id);
+			if kitty_attr_1.hp/kitty_2_ce>=kitty_attr_2.hp/kitty_1_ce{
+				kitty_attr_1.exp = kitty_attr_1.exp+kitty_attr_2.hp*kitty_2_ce;
+				kitty_attr_1.hp = kitty_attr_1.hp-kitty_attr_2.hp*kitty_2_ce/10;
+				kitty_attr_2.hp = 0;
+				kitty_attr_2.exp = kitty_attr_2.exp.checked_sub(kitty_attr_2.exp/10).ok_or("Overflow.")?;
+			}else{
+				kitty_attr_2.exp = kitty_attr_2.exp+kitty_attr_1.hp*kitty_1_ce;
+				kitty_attr_2.hp = kitty_attr_2.hp-kitty_attr_1.hp*kitty_1_ce/10;
+				kitty_attr_1.hp = 0;
+				kitty_attr_1.exp = kitty_attr_1.exp.checked_sub(kitty_attr_1.exp/10).ok_or("Overflow.")?;
+			}
+			kitty_attr_1.battle_begin = Some(curr_block);
+			kitty_attr_1.battle_end = Some(curr_block+4.into());
+			kitty_attr_2.battle_begin = Some(curr_block);
+			kitty_attr_2.battle_end = Some(curr_block+4.into());
+			match kitty_attr_1.hp{
+				0=>Self::deposit_event(RawEvent::Battled(sender,kitty_id,target_id,target_id)),
+				_=>Self::deposit_event(RawEvent::Battled(sender,kitty_id,target_id,kitty_id))
+			}
+			<KittyAttrs<T>>::insert(kitty_id,kitty_attr_1);
+			<KittyAttrs<T>>::insert(target_id,kitty_attr_2);
 		}
 
 
@@ -247,7 +284,7 @@ decl_module! {
 			let wild_animal = wild_animal.unwrap();
 
 			let kitty_score = kitty.hp / wild_animal.ce;
-			let wild_animal_score = wild_animal.hp / kitty.ce;
+			let wild_animal_score = wild_animal.hp / ce;
 
 			if kitty_score > wild_animal_score {
 				// success
@@ -268,10 +305,12 @@ decl_module! {
 				kitty.hp = 100;
 			}
 			<KittyAttrs<T>>::insert(kitty_id, kitty);
+			Self::deposit_event(RawEvent::FullHealth(sender,kitty_id,10.into()))
 		}
 		//商店上新装备,需要root权限
 		pub fn add_weaponry(origin,kind:WeaponryKind,name:Vec<u8>,combat_effectiveness:u32,price:BalanceOf<T>){
-			let sender = ensure_root(origin)?;
+			ensure_root(origin.clone())?;
+			let account_id = ensure_signed(origin)?;
 			let weaponry_id = Self::next_weaponry_id()?;
 			let weaponry = Weaponry{
 				name,
@@ -280,7 +319,8 @@ decl_module! {
 				kind
 			};
 			<Weaponrys<T>>::insert(weaponry_id,weaponry);
-			WeaponrysCount::put(weaponry_id+1);
+			WeaponrysCount::put(weaponry_id.checked_add(1).ok_or("overflow")?);
+			Self::deposit_event(RawEvent::AddWeaponry(account_id,weaponry_id));
 		}
 		//购买装备
 		pub fn buy_weaponry(origin,kitty_id:T::KittyIndex,weaponry_id:WeaponryIndex){
@@ -290,6 +330,7 @@ decl_module! {
 				let root_key = <sudo::Module<T>>::key();
 				T::Currency::transfer(&sender,&root_key, weaponry.price, ExistenceRequirement::KeepAlive)?;
 				<KittyWeaponrys<T>>::insert((kitty_id,weaponry.kind),weaponry_id);
+				Self::deposit_event(RawEvent::BuyWeaponry(sender,kitty_id,weaponry_id,weaponry.price));
 			}
 		}
 
@@ -307,7 +348,16 @@ fn combine_dna(dna1: u8, dna2: u8, selector: u8) -> u8 {
 impl<T: Trait> Module<T> {
 	//判断猫是否处于战斗中，繁殖、再挑战、打野、回血都需调用
 	fn check_battling(kitty_id:T::KittyIndex)->bool{
-		false
+		// let now = <timestamp::Module<T>>::get();
+		let curr_block = <system::Module<T>>::block_number();
+		let kitty_attrs = Self::kitty_attrs(kitty_id);
+		if(!kitty_attrs.battle_begin.is_some()){
+			return false;
+		}
+		if(kitty_attrs.battle_end.is_some() && kitty_attrs.battle_end.unwrap() < curr_block){
+			return false
+		}
+		true
 	}
 
 	//取猫攻击力
@@ -352,9 +402,9 @@ impl<T: Trait> Module<T> {
 
 	fn next_weaponry_id()-> result::Result<WeaponryIndex, DispatchError> {
 		let weaponry_id = Self::weaponrys_count();
-		// if weaponry_id = WeaponryIndex::max_value(){
-			// return Err(Error::IndexCountOverflow.into());
-		// }
+		if weaponry_id == WeaponryIndex::max_value(){
+			return Err(Error::<T>::IndexCountOverflow.into());
+		}
 		Ok(weaponry_id)
 	}
 
@@ -413,16 +463,7 @@ impl<T: Trait> Module<T> {
  		<OwnedKittiesList<T>>::append(&to, kitty_id);
  		<KittyOwners<T>>::insert(kitty_id, to);
 	 }
-	//打野 
-	fn do_battle_wild(kitty_id:T::KittyIndex){
-
-	}
 	
-	//战后经验处理
-	fn do_exp(kitty_id:T::KittyIndex,exp:u32){
-		
-	}
-
 	//通过offchainworker随机给链上猫侠攻击力
 	 fn do_offchain(curr_block:T::BlockNumber){
 		print("给某只猫加攻击")
