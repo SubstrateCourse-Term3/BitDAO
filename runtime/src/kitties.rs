@@ -260,7 +260,14 @@ decl_module! {
 		}
 
 		pub fn full_health(origin,kitty_id:T::KittyIndex){
-
+			let sender = ensure_signed(origin)?;
+			ensure!(<OwnedKitties<T>>::exists((&sender, Some(kitty_id))), Error::<T>::RequiresOwner);
+			let mut kitty = Self::kitty_attrs(kitty_id);
+			if kitty.hp < 100 {
+				//加血
+				kitty.hp = 100;
+			}
+			<KittyAttrs<T>>::insert(kitty_id, kitty);
 		}
 		//商店上新装备,需要root权限
 		pub fn add_weaponry(origin,kind:WeaponryKind,name:Vec<u8>,combat_effectiveness:u32,price:BalanceOf<T>){
@@ -414,11 +421,6 @@ impl<T: Trait> Module<T> {
 	//战后经验处理
 	fn do_exp(kitty_id:T::KittyIndex,exp:u32){
 		
-	}
-
-	//回血，判断是否处于战斗中
-	fn do_full_health(kitty_id:T::KittyIndex){
-
 	}
 
 	//通过offchainworker随机给链上猫侠攻击力
