@@ -10,15 +10,17 @@ use sp_std::result;
 use crate::linked_item::{LinkedList, LinkedItem};
 use system::{offchain::SubmitUnsignedTransaction};
 use sp_std::vec::Vec;
+#[cfg(feature = "std")]
+use serde::{Serialize, Deserialize};
 
-pub trait Trait: system::Trait+timestamp::Trait{
+pub trait Trait: system::Trait+timestamp::Trait+sudo::Trait{
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 	type KittyIndex: Parameter + Member + SimpleArithmetic + Bounded + Default + Copy;
 	type Currency: Currency<Self::AccountId>;
 	type Randomness: Randomness<Self::Hash>;
 }
 
-type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
+pub type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 type WeaponryIndex = u32;
 pub struct Kitty(pub [u8; 16]);
 
@@ -44,6 +46,7 @@ pub struct KittyAttr<Moment> {
 	pub battle_type: Option<BattleType>,
 }
 #[derive(Encode,Decode,Clone,PartialEq,Eq,Copy,Debug)]
+#[cfg_attr(feature = "std", derive( Serialize, Deserialize))]
 pub enum WeaponryKind{
 	HELMET,//头盔
 	ARMOR, //铠甲
@@ -51,7 +54,8 @@ pub enum WeaponryKind{
 	SHOES,//鞋子
 }
 //疯狂面具,吸血面具,刃甲,强袭装甲,羊刀,圣剑 精灵皮靴,飞鞋
-#[derive(Encode,Decode,Clone,PartialEq)]
+#[derive(Encode,Decode,Clone,PartialEq,Debug)]
+#[cfg_attr(feature = "std", derive( Serialize, Deserialize))]
 pub struct Weaponry<BalanceOf>{
 	pub name:Vec<u8>,
 	pub kind:WeaponryKind,
@@ -100,10 +104,10 @@ decl_storage! {
 		pub KittyAttrs get(fn kitty_attrs): map  T::KittyIndex => KittyAttr<T::Moment>;
 
 		//系统武器商店
-		pub Weaponrys get(fn weaponrys):map WeaponryIndex => Option<Weaponry<BalanceOf<T>>>;
+		pub Weaponrys get(fn weaponrys) config() :map WeaponryIndex => Option<Weaponry<BalanceOf<T>>>;
 
 		//武器数量
-		pub WeaponrysCount get(fn weaponrys_count): WeaponryIndex;
+		pub WeaponrysCount get(fn weaponrys_count) config() : WeaponryIndex;
 
 		//每猫至多装配四个武器
 		pub KittyWeaponrys get(fn kitty_weaponrys):map  (T::KittyIndex,WeaponryKind) =>Option<WeaponryIndex>;
@@ -276,8 +280,9 @@ decl_module! {
 			let sender = ensure_signed(origin)?;
 			ensure!(<OwnedKitties<T>>::exists((&sender, Some(kitty_id))), Error::<T>::RequiresOwner);
 			if let Some(weaponry) = Self::weaponrys(weaponry_id){
+				let root_key = <sudo::Module<T>>::key();
+				T::Currency::transfer(&sender,&root_key, weaponry.price, ExistenceRequirement::KeepAlive)?;
 				<KittyWeaponrys<T>>::insert((kitty_id,weaponry.kind),weaponry_id);
-				//TODO transfer to root
 			}
 		}
 
@@ -356,8 +361,14 @@ impl<T: Trait> Module<T> {
 		<KittiesCount<T>>::put(kitty_id + 1.into());
 		<KittyOwners<T>>::insert(kitty_id, owner.clone());
 		//TODO 添加战斗属性默认值
-
-
+		<KittyAttrs<T>>::insert(kitty_id,KittyAttr{
+			hp:100, 
+			exp:0,
+			ce:100,
+			battle_begin: None,
+			battle_end: None,
+			battle_type: None,
+		});
 		Self::insert_owned_kitty(owner, kitty_id);
 	}
 

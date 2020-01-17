@@ -69,7 +69,7 @@ pub type DigestItem = generic::DigestItem<Hash>;
 mod template;
 
 /// Used for the module kitties in `./kitties.rs`
-mod kitties;
+pub mod kitties;
 
 mod linked_item;
 
@@ -273,7 +273,7 @@ construct_runtime!(
 		TemplateModule: template::{Module, Call, Storage, Event<T>},
 		RandomnessCollectiveFlip: randomness_collective_flip::{Module, Call, Storage},
 		// Substrate Kitties module
-		Kitties: kitties::{Module, Storage, Call, Event<T>},
+		Kitties: kitties::{Module, Storage, Call, Event<T>, Config<T>},
 	}
 );
 
