@@ -1,13 +1,15 @@
 use sp_core::{Pair, Public, sr25519};
 use runtime::{
-	AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig,
-	SudoConfig, IndicesConfig, SystemConfig, WASM_BINARY, Signature
+	AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig,kitties,
+	SudoConfig, IndicesConfig, SystemConfig, KittiesConfig, WASM_BINARY, Signature
 };
 use sp_consensus_aura::sr25519::{AuthorityId as AuraId};
 use grandpa_primitives::{AuthorityId as GrandpaId};
 use sc_service;
 use sp_runtime::traits::{Verify, IdentifyAccount};
-
+use runtime::kitties::BalanceOf;
+// use substrate_kitties_runtime::kitties;
+// use hex_literal::hex;
 // Note this is the URL for the telemetry server
 //const STAGING_TELEMETRY_URL: &str = "wss://telemetry.polkadot.io/submit/";
 
@@ -48,6 +50,7 @@ pub fn get_authority_keys_from_seed(s: &str) -> (AuraId, GrandpaId) {
 		get_from_seed::<GrandpaId>(s),
 	)
 }
+
 
 impl Alternative {
 	/// Get an actual chain config from one of the alternatives.
@@ -118,6 +121,34 @@ fn testnet_genesis(initial_authorities: Vec<(AuraId, GrandpaId)>,
 	root_key: AccountId,
 	endowed_accounts: Vec<AccountId>,
 	_enable_println: bool) -> GenesisConfig {
+		let initial_weaponry = vec![
+		("疯狂面具",kitties::WeaponryKind::HELMET,40,10),
+		("吸血面具",kitties::WeaponryKind::HELMET,5,15),
+		("刃甲",kitties::WeaponryKind::ARMOR,15,15),
+		("强袭装甲",kitties::WeaponryKind::ARMOR,30,30),
+		("羊刀",kitties::WeaponryKind::WEAPON,30,30),
+		("圣剑",kitties::WeaponryKind::WEAPON,50,50),
+		("精灵皮靴",kitties::WeaponryKind::SHOES,5,10),
+		("飞鞋",kitties::WeaponryKind::SHOES,5,20),
+		];
+		let mut initial_vec = vec![];
+		for (index , &w ) in initial_weaponry.clone().iter().enumerate(){
+			let ww = kitties::Weaponry{
+				name: w.0.as_bytes().to_vec(),
+				kind: w.1,
+				price:w.2,
+				ce:w.3,
+			};
+			initial_vec.push((index as u32,ww));
+		}
+		// let m = initial_weaponry.iter().enumerate().map(|(index,&w)| {
+		// 	(index,kitties::Weaponry{
+		// 		name: w.0.as_bytes().to_vec(),
+		// 		kind: w.1,
+		// 		price:w.2,
+		// 		ce:w.3,
+		// 	})
+		// }).collect::<Vec<(u32,kitties::Weaponry)>>();
 	GenesisConfig {
 		system: Some(SystemConfig {
 			code: WASM_BINARY.to_vec(),
@@ -138,6 +169,10 @@ fn testnet_genesis(initial_authorities: Vec<(AuraId, GrandpaId)>,
 		}),
 		grandpa: Some(GrandpaConfig {
 			authorities: initial_authorities.iter().map(|x| (x.1.clone(), 1)).collect(),
+		}),
+		kitties: Some(KittiesConfig{
+			weaponrys_count: initial_vec.len() as u32,
+			weaponrys:initial_vec,
 		}),
 	}
 }

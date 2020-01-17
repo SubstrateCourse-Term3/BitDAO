@@ -63,27 +63,49 @@ You'll need two terminal windows open.
 
 We'll start Alice's substrate node first on default TCP port 30333 with her chain database stored locally at `/tmp/alice`. The bootnode ID of her node is `QmRpheLN4JWdAnY7HGJfWFNbfkQCb6tFf4vvA6hgjMZKrR`, which is generated from the `--node-key` value that we specify below:
 
-```bash
-cargo run -- \
-  --base-path /tmp/alice \
-  --chain=local \
-  --alice \
-  --node-key 0000000000000000000000000000000000000000000000000000000000000001 \
-  --telemetry-url ws://telemetry.polkadot.io:1024 \
-  --validator
+# Settings
+
+1) Open [Polkadot UI](https://polkadot.js.org/apps/#/explorer) , Settings -> Local Node
+
+2) Go to *Settings*, open *Developer* tab. Insert in textbox description of types (copy&paste from here) and Save it.
+
+```json
+{
+  "Kitty": "[u8, 16]",
+  "KittyIndex": "u32",
+  "KittyLinkedItem": {
+    "prev": "Option<KittyIndex>",
+    "next": "Option<KittyIndex>"
+  },
+  "BalanceOf":"Balance",
+  "Weaponry":{
+  "name":"Vec<u8>",
+  "kind":"WeaponryKind",
+  "ce":"u32",
+  "price":"BalanceOf"
+  },
+  "WeaponryIndex": "u32",
+  "KittyAttr": {
+    "hp": "u32",
+    "exp": "u32",
+    "ce": "u32",
+    "battle_begin": "Option<Moment>",
+    "battle_end": "Option<Moment>",
+    "battle_type": "Option<BattleType>"
+  },
+  "WeaponryKind": {
+    "_enum": [
+      "HELMET",
+      "ARMOR",
+      "WEAPON",
+      "SHOES"
+    ]
+  },
+  "BattleType": {
+    "_enum": [
+      "WILD",
+      "KITTY"
+    ]
+  }
+}
 ```
-
-In the second terminal, we'll start Bob's substrate node on a different TCP port of 30334, and with his chain database stored locally at `/tmp/bob`. We'll specify a value for the `--bootnodes` option that will connect his node to Alice's bootnode ID on TCP port 30333:
-
-```bash
-cargo run -- \
-  --base-path /tmp/bob \
-  --bootnodes /ip4/127.0.0.1/tcp/30333/p2p/QmRpheLN4JWdAnY7HGJfWFNbfkQCb6tFf4vvA6hgjMZKrR \
-  --chain=local \
-  --bob \
-  --port 30334 \
-  --telemetry-url ws://telemetry.polkadot.io:1024 \
-  --validator
-```
-
-Additional CLI usage options are available and may be shown by running `cargo run -- --help`.
