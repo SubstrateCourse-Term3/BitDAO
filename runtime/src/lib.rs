@@ -21,10 +21,10 @@ use sp_api::impl_runtime_apis;
 use sp_consensus_aura::sr25519::AuthorityId as AuraId;
 use grandpa::AuthorityList as GrandpaAuthorityList;
 use grandpa::fg_primitives;
+use system::offchain::TransactionSubmitter;
 use sp_version::RuntimeVersion;
 #[cfg(feature = "std")]
 use sp_version::NativeVersion;
-
 // A few exports that help ease life for downstream crates.
 #[cfg(any(feature = "std", test))]
 pub use sp_runtime::BuildStorage;
@@ -36,6 +36,7 @@ pub use frame_support::{
 	traits::Randomness,
 	weights::Weight,
 };
+
 
 pub type SignedPayload = generic::SignedPayload<Call, SignedExtra>;
 
@@ -247,12 +248,14 @@ impl sudo::Trait for Runtime {
 impl template::Trait for Runtime {
 	type Event = Event;
 }
-
+type SubmitTransaction = TransactionSubmitter<AuraId, Runtime, UncheckedExtrinsic>;
 impl kitties::Trait for Runtime {
 	type Event = Event;
 	type KittyIndex = u32;
 	type Currency = Balances;
 	type Randomness = RandomnessCollectiveFlip;
+	type Call = Call;
+	type SubmitTransaction = SubmitTransaction;
 }
 
 construct_runtime!(
@@ -273,7 +276,7 @@ construct_runtime!(
 		TemplateModule: template::{Module, Call, Storage, Event<T>},
 		RandomnessCollectiveFlip: randomness_collective_flip::{Module, Call, Storage},
 		// Substrate Kitties module
-		Kitties: kitties::{Module, Storage, Call, Event<T>, Config<T>},
+		Kitties: kitties::{Module, Storage, Call, Event<T>, Config<T>,ValidateUnsigned},
 	}
 );
 
