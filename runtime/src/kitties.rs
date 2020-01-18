@@ -2,22 +2,34 @@ use frame_support::{
 	decl_module, decl_storage, decl_event, decl_error, ensure, StorageValue, StorageMap,print,
 	Parameter, traits::{Randomness, Currency, ExistenceRequirement}
 };
-use sp_runtime::{traits::{SimpleArithmetic, Bounded, Member}, DispatchError};
+// use rstd::convert::{Into, TryFrom, TryInto};
+use sp_runtime::{traits::{SimpleArithmetic, Bounded, Member}, DispatchError,	transaction_validity::{
+	TransactionLongevity, TransactionPriority, TransactionValidity, UnknownTransaction,
+	ValidTransaction,
+	},DispatchResult as dispatch_result};
 use codec::{Encode, EncodeLike, Decode, Output, Input};
 use sp_io::hashing::blake2_128;
-use system::{ensure_signed, ensure_root};
+use system::{ensure_signed, ensure_root,ensure_none};
 use sp_std::result;
 use crate::linked_item::{LinkedList, LinkedItem};
 use system::{offchain::SubmitUnsignedTransaction};
-use sp_std::vec::Vec;
+use sp_std::{
+	convert::{Into, TryInto},
+	prelude::*,
+	result::Result,
+	vec::Vec,
+};
 #[cfg(feature = "std")]
 use serde::{Serialize, Deserialize};
-
+use sp_runtime::traits::{Hash, BlakeTwo256};
+use sp_runtime::RandomNumberGenerator;
 pub trait Trait: system::Trait+timestamp::Trait+sudo::Trait{
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
-	type KittyIndex: Parameter + Member + SimpleArithmetic + Bounded + Default + Copy;
+	type KittyIndex: Parameter + Member + SimpleArithmetic + Bounded + Default + Copy+Into<u32>;
 	type Currency: Currency<Self::AccountId>;
 	type Randomness: Randomness<Self::Hash>;
+	type Call: From<Call<Self>>;
+	type SubmitTransaction: SubmitUnsignedTransaction<Self, <Self as Trait>::Call>;
 }
 pub type BalanceOf<T> = <<T as Trait>::Currency as Currency<<T as system::Trait>::AccountId>>::Balance;
 type WeaponryIndex = u32;
@@ -134,6 +146,8 @@ decl_event!(
 		FullHealth(AccountId,KittyIndex,Balance),
 		/// Battled (owner,kitty_1,kitty_2,win_kitty_id)
 		Battled(AccountId,KittyIndex,KittyIndex,KittyIndex),
+		///offchain worker lottery (kitty_id)
+		Lottery(KittyIndex),
 	}
 );
 
@@ -266,10 +280,15 @@ decl_module! {
 			kitty_attr_1.battle_end = Some(curr_block+4.into());
 			kitty_attr_2.battle_begin = Some(curr_block);
 			kitty_attr_2.battle_end = Some(curr_block+4.into());
-			match kitty_attr_1.hp{
-				0=>Self::deposit_event(RawEvent::Battled(sender,kitty_id,target_id,target_id)),
-				_=>Self::deposit_event(RawEvent::Battled(sender,kitty_id,target_id,kitty_id))
+			if kitty_attr_1.hp == 0{
+				Self::deposit_event(RawEvent::Battled(sender,kitty_id,target_id,target_id))
+			}else{
+				Self::deposit_event(RawEvent::Battled(sender,kitty_id,target_id,kitty_id));
 			}
+			// match kitty_attr_1.hp{
+			// 	0=>Self::deposit_event(RawEvent::Battled(sender,kitty_id,target_id,target_id)),
+			// 	_=>Self::deposit_event(RawEvent::Battled(sender,kitty_id,target_id,kitty_id))
+			// }
 			<KittyAttrs<T>>::insert(kitty_id,kitty_attr_1);
 			<KittyAttrs<T>>::insert(target_id,kitty_attr_2);
 		}
@@ -304,6 +323,8 @@ decl_module! {
 				//加血
 				kitty.hp = 100;
 			}
+			let root_key = <sudo::Module<T>>::key();
+			T::Currency::transfer(&sender,&root_key, 10.into(), ExistenceRequirement::KeepAlive)?;
 			<KittyAttrs<T>>::insert(kitty_id, kitty);
 			Self::deposit_event(RawEvent::FullHealth(sender,kitty_id,10.into()))
 		}
@@ -335,9 +356,27 @@ decl_module! {
 		}
 
 		fn offchain_worker(curr_block: T::BlockNumber){
-			Self::do_offchain(curr_block)
+			if TryInto::<u64>::try_into(curr_block).ok().unwrap() % 5 == 0 {
+				Self::do_offchain(curr_block)
+			}
 		}
 
+		fn update_kitty_ec(origin,kitty_id:T::KittyIndex,ce:u32) -> dispatch_result{
+			ensure_none(origin)?;
+			if !Self::kitties(kitty_id).is_some(){
+				return Ok(())
+			}
+			let mut kitty_attr = Self::kitty_attrs(kitty_id);
+			if (kitty_attr.ce == u32::max_value()){
+				print("overflow");
+			}else{
+				kitty_attr.ce = kitty_attr.ce+ce;
+				<KittyAttrs<T>>::insert(kitty_id,kitty_attr);
+				Self::deposit_event(RawEvent::Lottery(kitty_id));
+			}
+			print("submit offchain");
+			Ok(())
+		}
 	}
 }
 
@@ -465,8 +504,55 @@ impl<T: Trait> Module<T> {
 	 }
 	
 	//通过offchainworker随机给链上猫侠攻击力
-	 fn do_offchain(curr_block:T::BlockNumber){
-		print("给某只猫加攻击")
+	 pub(crate) fn do_offchain(curr_block:T::BlockNumber){
+		let kitty_count = Self::kitties_count();
+		if(kitty_count==0.into()){
+			print("There is nothing");
+			return
+		}
+		let payload = (
+			T::Randomness::random_seed(),
+			<system::Module<T>>::extrinsic_index(),
+			<system::Module<T>>::block_number(),
+		);
+		let random_seed  = payload.using_encoded(blake2_128);
+		let now = <timestamp::Module<T>>::get();
+		let random_seed = BlakeTwo256::hash(&random_seed);
+		let mut rng = <RandomNumberGenerator<BlakeTwo256>>::new(random_seed);
+		let random = rng.pick_u32(kitty_count.into()-1);
+		print(random);
+		let kitty_id:T::KittyIndex = random.into();
+		print("random kitty index");
+		let call = Call::update_kitty_ec(kitty_id,1u32);
+		let result = T::SubmitTransaction::submit_unsigned(call);
+		match result{
+			Ok(_)=>{
+				print("success")
+			},
+			Err(_)=>{
+				()
+				// print("offchain submit error")
+			}
+		}
+		print("Congratulations");
+	}
+}
+
+
+impl<T: Trait> frame_support::unsigned::ValidateUnsigned for Module<T> {
+	type Call = Call<T>;
+
+	fn validate_unsigned(call: &Self::Call) -> TransactionValidity {
+		match call {
+			Call::update_kitty_ec(_,_) => Ok(ValidTransaction {
+				priority: 0,
+				requires: vec![],
+				provides: vec![0.encode()],
+				longevity: TransactionLongevity::max_value(),
+				propagate: true,
+			}),
+			_ => UnknownTransaction::NoUnsignedValidator.into(),
+		}
 	}
 }
 
@@ -498,7 +584,7 @@ mod tests {
 	}
 	impl system::Trait for Test {
 		type Origin = Origin;
-		type Call = ();
+		// type Call = ();
 		type Index = u64;
 		type BlockNumber = u64;
 		type Hash = H256;

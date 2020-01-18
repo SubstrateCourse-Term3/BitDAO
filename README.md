@@ -9,65 +9,93 @@
     + 经验值：EXP（Experience）
     + 战斗力：CE（Combat Effectiveness)
     + 血量：HP(Health Point）
-    + ~~魔力值：MP(Magic Point)~~
 
-# Substrate Node Template
+### 操作流程
 
-A new SRML-based Substrate node, ready for hacking.
++ 初始化数据
 
-## Build
+装备类型：头盔、铠甲、武器、鞋子
 
-Install Rust:
+区块链启动创世区块初始化8件装备,每类两件（疯狂面具,吸血面具,刃甲,强袭装甲,羊刀,圣剑，精灵皮靴,飞鞋）
 
-```bash
-curl https://sh.rustup.rs -sSf | sh
+可通过root权限添加新装备，设置装备类型、名称、攻击力、价格
+
+```
+pub fn add_weaponry(origin,kind:WeaponryKind,name:Vec<u8>,combat_effectiveness:u32,price:BalanceOf<T>)
 ```
 
-Initialize your Wasm Build environment:
+通过root权限添加野怪，设置血量、攻击力
 
-```bash
-./scripts/init.sh
+```
+pub fn create_wild_animal(origin, health_point:u32, combat_effectiveness:u32) 
+```
++ 创建小猫
+  
+小猫创建，默认攻击力100，经验0，血量100
+
+```
+pub fn create(origin) 
 ```
 
-Build Wasm and native code:
++ 购买武器 
+  
+通过购买武器增加小猫攻击力，每类装备只能佩戴一件，钱默认转给root
 
-```bash
-cargo build --release
+```
+pub fn buy_weaponry(origin,kitty_id:T::KittyIndex,weaponry_id:WeaponryIndex)
 ```
 
-## Run
-
-### Single node development chain
-
-Purge any existing developer chain state:
-
-```bash
-./target/release/substrate-kitties purge-chain --dev
++ 打野升级
+  
+打野可以升级经验，增加攻击力
+选择自己的小猫与指定野怪，会受到伤害减少血量
+```
+pub fn battle_wild(origin,kitty_id:T::KittyIndex,wild_animal_id:u32)
 ```
 
-Start a development chain with:
++ 对战
 
-```bash
-./target/release/substrate-kitties --dev
+选择其他玩家的小猫进行挑战，败者血量归零，选择的猫与擂主都需要处于空闲状态，对战后双方猫会冷却一定时间
+
+```
+pub fn battle(origin,kitty_id:T::KittyIndex,target_id:T::KittyIndex)
 ```
 
-Detailed logs may be shown by running the node with the following environment variables set: `RUST_LOG=debug RUST_BACKTRACE=1 cargo run -- --dev`.
++ 加血
 
-### Multi-node local testnet
+受到伤害后，在回合战之后可以支付token进行回血,token默认支付给root
 
-If you want to see the multi-node consensus algorithm in action locally, then you can create a local testnet with two validator nodes for Alice and Bob, who are the initial authorities of the genesis chain that have been endowed with testnet units.
+```
+pub fn full_health(origin,kitty_id:T::KittyIndex)
+```
 
-Optionally, give each node a name and expose them so they are listed on the Polkadot [telemetry site](https://telemetry.polkadot.io/#/Local%20Testnet).
++ 抽奖
+  
+系统通过offchainworker实现定期抽奖功能，随机抽取一只小猫增加攻击力
 
-You'll need two terminal windows open.
+```
+let random_seed  = payload.using_encoded(blake2_128);
+let now = <timestamp::Module<T>>::get();
+let random_seed = BlakeTwo256::hash(&random_seed);
+let mut rng = <RandomNumberGenerator<BlakeTwo256>>::new(random_seed);
+let random = rng.pick_u32(kitty_count.into()-1);
+```
++ 挂牌交易
 
-We'll start Alice's substrate node first on default TCP port 30333 with her chain database stored locally at `/tmp/alice`. The bootnode ID of her node is `QmRpheLN4JWdAnY7HGJfWFNbfkQCb6tFf4vvA6hgjMZKrR`, which is generated from the `--node-key` value that we specify below:
+```
+pub fn ask(origin, kitty_id: T::KittyIndex, price: Option<BalanceOf<T>>) 
+```
++ 购买
+```
+pub fn buy(origin, kitty_id: T::KittyIndex, price: BalanceOf<T>) 
+```
++ 繁殖
 
-# Settings
+```
+fn do_breed(sender: &T::AccountId, kitty_id_1: T::KittyIndex, kitty_id_2: T::KittyIndex) -> result::Result<T::KittyIndex, DispatchError> 
+```
 
-1) Open [Polkadot UI](https://polkadot.js.org/apps/#/explorer) , Settings -> Local Node
-
-2) Go to *Settings*, open *Developer* tab. Insert in textbox description of types (copy&paste from here) and Save it.
+### 数据结构
 
 ```json
 {
@@ -77,12 +105,12 @@ We'll start Alice's substrate node first on default TCP port 30333 with her chai
     "prev": "Option<KittyIndex>",
     "next": "Option<KittyIndex>"
   },
-  "BalanceOf":"Balance",
-  "Weaponry":{
-  "name":"Vec<u8>",
-  "kind":"WeaponryKind",
-  "ce":"u32",
-  "price":"BalanceOf"
+  "BalanceOf": "Balance",
+  "Weaponry": {
+    "name": "Vec<u8>",
+    "kind": "WeaponryKind",
+    "ce": "u32",
+    "price": "BalanceOf"
   },
   "WeaponryIndex": "u32",
   "KittyAttr": {
@@ -106,6 +134,10 @@ We'll start Alice's substrate node first on default TCP port 30333 with her chai
       "WILD",
       "KITTY"
     ]
+  },
+  "WildAnimal": {
+    "hp": "u32",
+    "ce": "u32"
   }
 }
 ```
